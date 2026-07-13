@@ -1,97 +1,240 @@
 pipeline {
+
     agent any
 
+
     tools {
-        maven 'Maven3'   // Name must match a Maven installation configured in Jenkins > Global Tool Configuration
-        jdk 'JDK17'      // Name must match a JDK installation configured in Jenkins > Global Tool Configuration
+
+
+        maven 'Maven3'
+
     }
+
 
     environment {
-        // Change these to match your own Docker Hub / registry account
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials') // Jenkins credential ID (username/password)
-        DOCKER_IMAGE           = "yourdockerhubusername/ott-platform"
-        IMAGE_TAG              = "${env.BUILD_NUMBER}"
+
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+
+        DOCKER_IMAGE = "gurugowdamn/ott-platform"
+
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        CONTAINER_NAME = "ott-platform-app"
+
+        NETWORK_NAME = "ott-network"
+
     }
 
+
     options {
+
         timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+
+        buildDiscarder(logRotator(
+            numToKeepStr: '10'
+        ))
+
     }
+
 
     stages {
 
+
         stage('Checkout') {
+
             steps {
-                echo 'Checking out source code...'
+
+                echo 'Checking out source code'
+
                 checkout scm
+
             }
+
         }
+
+
 
         stage('Build') {
+
             steps {
-                echo 'Building with Maven...'
-                sh 'mvn -B clean compile'
+
+                echo 'Building Spring Boot application'
+
+                sh '''
+
+                mvn clean package -DskipTests
+
+                '''
+
             }
+
         }
+
+
 
         stage('Test') {
+
             steps {
-                echo 'Running unit tests...'
-                sh 'mvn -B test'
+
+                echo 'Running Unit Tests'
+
+                sh '''
+
+                mvn test
+
+                '''
+
             }
+
             post {
+
                 always {
+
                     junit '**/target/surefire-reports/*.xml'
+
                 }
+
             }
+
         }
 
-        stage('Package') {
-            steps {
-                echo 'Packaging application as JAR...'
-                sh 'mvn -B package -DskipTests'
-            }
-            post {
-                success {
-                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                }
-            }
-        }
+
 
         stage('Docker Build') {
+
             steps {
-                echo 'Building Docker image...'
-                sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} -t ${DOCKER_IMAGE}:latest ."
+
+                echo 'Building Docker Image'
+
+                sh '''
+
+                docker build \
+                -t ${DOCKER_IMAGE}:${IMAGE_TAG} \
+                -t ${DOCKER_IMAGE}:latest .
+
+                '''
+
             }
+
         }
 
-        stage('Docker Push') {
+
+
+        stage('Docker Login & Push') {
+
             steps {
-                echo 'Pushing Docker image to registry...'
-                sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
-                sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
-                sh "docker push ${DOCKER_IMAGE}:latest"
+
+                echo 'Pushing Image to Docker Hub'
+
+
+                sh '''
+
+                echo $DOCKERHUB_CREDENTIALS_PSW | \
+                docker login \
+                -u $DOCKERHUB_CREDENTIALS_USR \
+                --password-stdin
+
+
+                docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
+
+
+                docker push ${DOCKER_IMAGE}:latest
+
+
+                '''
+
             }
+
         }
 
-        stage('Deploy') {
+
+
+        stage('Deploy OTT Application') {
+
             steps {
-                echo 'Deploying with docker-compose...'
-                sh 'docker compose down || true'
-                sh 'docker compose up -d --build'
+
+
+                echo 'Deploying new container'
+
+
+                sh '''
+
+                docker stop ${CONTAINER_NAME} || true
+
+
+                docker rm ${CONTAINER_NAME} || true
+
+
+
+                docker run -d \
+                --name ${CONTAINER_NAME} \
+                --network ${NETWORK_NAME} \
+                -p 8081:8081 \
+                -e SPRING_PROFILES_ACTIVE=local \
+                ${DOCKER_IMAGE}:latest
+
+
+                '''
+
             }
+
         }
+
+
+
+        stage('Verify Deployment') {
+
+            steps {
+
+                echo 'Checking application health'
+
+
+                sh '''
+
+                sleep 20
+
+
+                curl -f http://localhost:8081/api/ping
+
+
+                '''
+
+            }
+
+        }
+
+
     }
+
 
     post {
+
+
         success {
-            echo 'Pipeline completed successfully!'
+
+            echo 'OTT Platform Deployment Successful'
+
         }
+
+
         failure {
-            echo 'Pipeline failed. Check the logs above.'
+
+            echo 'OTT Platform Deployment Failed'
+
         }
+
+
         always {
-            sh 'docker logout || true'
+
+            sh '''
+
+            docker logout || true
+
+            '''
+
         }
+
     }
+
+
 }
