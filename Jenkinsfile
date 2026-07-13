@@ -2,14 +2,9 @@ pipeline {
 
     agent any
 
-
     tools {
-
-
         maven 'Maven3'
-
     }
-
 
     environment {
 
@@ -21,8 +16,6 @@ pipeline {
 
         CONTAINER_NAME = "ott-platform-app"
 
-        NETWORK_NAME = "ott-network"
-
     }
 
 
@@ -30,10 +23,11 @@ pipeline {
 
         timestamps()
 
-        buildDiscarder(logRotator(
-            numToKeepStr: '10'
-        ))
-
+        buildDiscarder(
+            logRotator(
+                numToKeepStr: '10'
+            )
+        )
     }
 
 
@@ -44,12 +38,11 @@ pipeline {
 
             steps {
 
-                echo 'Checking out source code'
+                echo "Checking out source code"
 
                 checkout scm
 
             }
-
         }
 
 
@@ -58,16 +51,11 @@ pipeline {
 
             steps {
 
-                echo 'Building Spring Boot application'
+                echo "Building application"
 
-                sh '''
-
-                mvn clean package -DskipTests
-
-                '''
+                sh 'mvn clean compile'
 
             }
-
         }
 
 
@@ -76,13 +64,9 @@ pipeline {
 
             steps {
 
-                echo 'Running Unit Tests'
+                echo "Running unit tests"
 
-                sh '''
-
-                mvn test
-
-                '''
+                sh 'mvn test'
 
             }
 
@@ -90,7 +74,36 @@ pipeline {
 
                 always {
 
-                    junit '**/target/surefire-reports/*.xml'
+                    junit allowEmptyResults: true,
+                          testResults: '**/target/surefire-reports/*.xml'
+
+                }
+
+            }
+
+        }
+
+
+
+        stage('Package') {
+
+            steps {
+
+                echo "Creating Spring Boot Jar"
+
+                sh 'mvn package -DskipTests'
+
+            }
+
+
+            post {
+
+                success {
+
+                    archiveArtifacts(
+                        artifacts: 'target/*.jar',
+                        fingerprint: true
+                    )
 
                 }
 
@@ -104,15 +117,13 @@ pipeline {
 
             steps {
 
-                echo 'Building Docker Image'
+                echo "Building Docker image"
 
-                sh '''
-
+                sh """
                 docker build \
                 -t ${DOCKER_IMAGE}:${IMAGE_TAG} \
                 -t ${DOCKER_IMAGE}:latest .
-
-                '''
+                """
 
             }
 
@@ -124,24 +135,22 @@ pipeline {
 
             steps {
 
-                echo 'Pushing Image to Docker Hub'
+                echo "Logging into Docker Hub"
 
 
-                sh '''
+                sh """
 
-                echo $DOCKERHUB_CREDENTIALS_PSW | \
+                echo \$DOCKERHUB_CREDENTIALS_PSW | \
                 docker login \
-                -u $DOCKERHUB_CREDENTIALS_USR \
+                -u \$DOCKERHUB_CREDENTIALS_USR \
                 --password-stdin
 
 
                 docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
 
-
                 docker push ${DOCKER_IMAGE}:latest
 
-
-                '''
+                """
 
             }
 
@@ -153,28 +162,24 @@ pipeline {
 
             steps {
 
+                echo "Deploying container"
 
-                echo 'Deploying new container'
 
-
-                sh '''
+                sh """
 
                 docker stop ${CONTAINER_NAME} || true
-
 
                 docker rm ${CONTAINER_NAME} || true
 
 
-
                 docker run -d \
                 --name ${CONTAINER_NAME} \
-                --network ${NETWORK_NAME} \
+                --network ott-network \
                 -p 8081:8081 \
                 -e SPRING_PROFILES_ACTIVE=local \
                 ${DOCKER_IMAGE}:latest
 
-
-                '''
+                """
 
             }
 
@@ -186,18 +191,17 @@ pipeline {
 
             steps {
 
-                echo 'Checking application health'
+                echo "Checking application health"
 
 
-                sh '''
+                sh """
 
                 sleep 20
 
 
                 curl -f http://localhost:8081/api/ping
 
-
-                '''
+                """
 
             }
 
@@ -207,19 +211,20 @@ pipeline {
     }
 
 
+
     post {
 
 
         success {
 
-            echo 'OTT Platform Deployment Successful'
+            echo "OTT Platform Deployment Successful"
 
         }
 
 
         failure {
 
-            echo 'OTT Platform Deployment Failed'
+            echo "OTT Platform Deployment Failed"
 
         }
 
@@ -235,6 +240,5 @@ pipeline {
         }
 
     }
-
 
 }
